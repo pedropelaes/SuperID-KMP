@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.superid.security.CryptoManager
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.firestore.DocumentReference
@@ -41,7 +42,6 @@ import com.google.mlkit.common.MlKitException
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
-import utils.CriptoUtils
 
 class QrCodeAuthActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -270,7 +270,8 @@ fun GetAccessToken(
                     )
                 ).addOnSuccessListener {
                     Log.d("LOGINSEMSENHA", "UID e accessToken adicionados com sucesso ao documento login")
-                    val newAccessToken = CriptoUtils.generateAccessToken()
+                    val cryptoManager = CryptoManager()
+                    val newAccessToken = cryptoManager.generateAccessToken()
                     document.reference.update("accessToken", newAccessToken)
                         .addOnSuccessListener {
                             Log.d("LOGINSEMSENHA", "accessToken atualizado no documento da senha")

@@ -10,4 +10,6 @@ expect class CryptoManager() {
 
     // Descriptografa o texto usando o IV e a Chave
     fun decrypt(encryptedText: String, ivBase64: String, secretKeyBase64: String): String
+
+    fun generateAccessToken(): String
 }

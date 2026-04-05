@@ -66,6 +66,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
+import com.example.superid.security.CryptoManager
 import org.example.superid.ui.theme.SuperIdTheme
 import org.example.superid.ui.theme.ui.common.DialogVerificarConta
 import org.example.superid.ui.theme.ui.common.PasswordRow
@@ -81,8 +82,8 @@ import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import utils.ChaveAesUtils
-import utils.CriptoUtils
+import org.example.superid.security.AndroidBiometricVault
+import org.example.superid.security.SecurityFlowManager
 import utils.getSenhasRef
 import utils.getSenhasRefDireto
 
@@ -164,6 +165,32 @@ fun PasswordsScreen(categoria: String?, icone: Int, viewModel: SenhasViewModel){
     val context = LocalContext.current
     val db = Firebase.firestore
     val auth = Firebase.auth
+    val uid = auth.currentUser?.uid
+
+    var decryptedAesKey by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(uid) {
+        if(uid != null){
+            try{
+                val vault = AndroidBiometricVault(context.findFragmentActivity())
+                val masterPassword = vault.getMasterPasswordSilently()
+                if(masterPassword != null){
+                    SecurityFlowManager.retrieveDecryptedAesKey(uid, masterPassword,
+                        db,
+                        onSuccess = {key ->
+                            decryptedAesKey = key
+                        },
+                        onFailure = {
+                            Log.e("CRYPTO", "Erro ao recuperar AES do Firebase")
+                        }
+                    )
+                }
+            }catch (e: Exception){
+                Log.e("CRYPTO", "Erro no Cofre", e)
+            }
+        }
+    }
+
     PasswordsScreenDesign(
         categoria = categoria,                                                                      //nome da categoria
         auth = auth,
@@ -175,78 +202,72 @@ fun PasswordsScreen(categoria: String?, icone: Int, viewModel: SenhasViewModel){
                 context.startActivity(Intent(context, LogInActivity::class.java))
                 return@PasswordsScreenDesign
             }
+
+            if(decryptedAesKey == null){
+                Toast.makeText(context, "Aguarde a segurança inicializar...", Toast.LENGTH_SHORT).show()
+                return@PasswordsScreenDesign
+            }
+
             getSenhasRef(                                                                           // caminho para as senhas da categoria
                 db = db,
                 uid = uid,
                 categoria = categoria,
                 onSuccess = { senhasRef ->
-                    ChaveAesUtils.recuperarChaveDoUsuario(                                          // utiliza a chave AES do usuário para criptografar
-                        uid,
-                        db,
-                        onSuccess = { chaveBase64 ->
-                            val secretKey = CriptoUtils.base64ToSecretKey(chaveBase64)                           // converte a chave AES do firestore
-                            val (senhaCripto, iv, accessToken) = CriptoUtils.encrypt(novaSenha.senha, secretKey) // gera a senha criptografada, iv e accesstoken
-                            val novoId = senhasRef.document().id
+                    val cryptoManager = CryptoManager()
 
+                    val (senhaCripto, iv) = cryptoManager.encrypt(novaSenha.senha, decryptedAesKey!!)
+                    val novoId = senhasRef.document().id
+                    val accessToken = cryptoManager.generateAccessToken()
 
-                            // Preenche os campos criptografados na instância
-                            novaSenha.senha = senhaCripto
-                            novaSenha.iv = iv
-                            novaSenha.id = novoId
-
-                            val doc = mutableMapOf(
-                                "senha" to senhaCripto,
-                                "iv" to iv,
-                                "accessToken" to accessToken,
-                                "login" to novaSenha.login,
-                                "descricao" to novaSenha.descricao,
-                                "id" to novaSenha.id,
-                            )
-                            if(categoria == "Sites") {                                              // se a categoria for sites, salva o campo url
-                                senhasRef.whereEqualTo("url", novaSenha.url).get()
-                                    .addOnSuccessListener { result ->
-                                        if (result.isEmpty) {
-                                            doc["url"] = novaSenha.url
-                                            // Salva no Firestore
-                                            senhasRef.document(novoId).set(doc)
-                                                .addOnSuccessListener {
-                                                    Toast.makeText(context, "Senha criada!", Toast.LENGTH_SHORT).show()
-                                                    viewModel.buscarSenhas(categoria)
-                                                }
-
-                                            // Remove placeholder, se ainda existir
-                                            senhasRef.document("placeholder").delete()
-                                                .addOnSuccessListener {
-                                                    Log.d("ADDPASSWORD", "Placeholder deletado")
-                                                }
-                                                .addOnFailureListener {
-                                                    Log.w("ADDPASSWORD", "Erro ao deletar placeholder", it)
-                                                }
-                                        } else {
-                                            Log.e("ADDPASSWORD", "URL já cadastrada!")
-                                            Toast.makeText(context, "Só é possivel usar um URL apenas para uma senha.", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                            }else{
-                                senhasRef.document(novoId).set(doc)
-                                    .addOnSuccessListener {
-                                        viewModel.buscarSenhas(categoria)
-                                        Toast.makeText(context, "Senha criada!", Toast.LENGTH_SHORT).show()
-                                    }
-                                // Remove placeholder, se ainda existir
-                                senhasRef.document("placeholder").delete()
-                                    .addOnSuccessListener {
-                                        Log.d("ADDPASSWORD", "Placeholder deletado")
-                                    }
-                                    .addOnFailureListener {
-                                        Log.w("ADDPASSWORD", "Erro ao deletar placeholder", it)
-                                    }
-                            }
-                        },
-                        onFailure = { e ->
-                            Log.e("CRYPTO", "Erro ao buscar chave AES", e)
-                        }
+                    val doc = mutableMapOf(
+                        "senha" to senhaCripto,
+                        "iv" to iv,
+                        "accessToken" to accessToken,
+                        "login" to novaSenha.login,
+                        "descricao" to novaSenha.descricao,
+                        "id" to novoId,
                     )
+                    if(categoria == "Sites") {                                              // se a categoria for sites, salva o campo url
+                        senhasRef.whereEqualTo("url", novaSenha.url).get()
+                            .addOnSuccessListener { result ->
+                                if (result.isEmpty) {
+                                    doc["url"] = novaSenha.url
+                                    // Salva no Firestore
+                                    senhasRef.document(novoId).set(doc)
+                                        .addOnSuccessListener {
+                                            Toast.makeText(context, "Senha criada!", Toast.LENGTH_SHORT).show()
+                                            viewModel.buscarSenhas(categoria)
+                                        }
+
+                                    // Remove placeholder, se ainda existir
+                                    senhasRef.document("placeholder").delete()
+                                        .addOnSuccessListener {
+                                            Log.d("ADDPASSWORD", "Placeholder deletado")
+                                        }
+                                        .addOnFailureListener {
+                                            Log.w("ADDPASSWORD", "Erro ao deletar placeholder", it)
+                                        }
+                                } else {
+                                    Log.e("ADDPASSWORD", "URL já cadastrada!")
+                                    Toast.makeText(context, "Só é possivel usar um URL apenas para uma senha.", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                    }else{
+                        senhasRef.document(novoId).set(doc)
+                            .addOnSuccessListener {
+                                viewModel.buscarSenhas(categoria)
+                                Toast.makeText(context, "Senha criada!", Toast.LENGTH_SHORT).show()
+                            }
+                        // Remove placeholder, se ainda existir
+                        senhasRef.document("placeholder").delete()
+                            .addOnSuccessListener {
+                                Log.d("ADDPASSWORD", "Placeholder deletado")
+                            }
+                            .addOnFailureListener {
+                                Log.w("ADDPASSWORD", "Erro ao deletar placeholder", it)
+                            }
+                    }
+
                 },
                 onFailure = { e ->
                     Log.e("ADDPASSWORD", e.message ?: "Erro desconhecido")
@@ -258,59 +279,58 @@ fun PasswordsScreen(categoria: String?, icone: Int, viewModel: SenhasViewModel){
             viewModel.buscarSenhas(categoria)
         }
         val senhas by remember { derivedStateOf { viewModel.listaSenhas } }
-        ColumnSenhas(senhasCriadas = senhas, categoria, viewModel, auth, db, searchQuery)
+        ColumnSenhas(senhasCriadas = senhas, categoria, viewModel, auth, db, searchQuery, decryptedAesKey)
     }
 }
 
-fun EditPasswordOnFirestore(categoria: String?, senha: Senha, novaSenha: Senha, viewModel: SenhasViewModel, db:FirebaseFirestore, auth: FirebaseAuth, context: Context){
+fun EditPasswordOnFirestore(categoria: String?, senha: Senha, novaSenha: Senha, viewModel: SenhasViewModel, db:FirebaseFirestore, auth: FirebaseAuth, context: Context, decryptedAesKey: String){
     val uid = auth.currentUser?.uid
     if (uid != null && categoria != null) {
-        ChaveAesUtils.recuperarChaveDoUsuario(
-            uid,
-            db,
-            onSuccess = { chaveBase64 ->
-                val secretKey = CriptoUtils.base64ToSecretKey(chaveBase64)
 
-                // Criptografa a senha que o usuário digitou
-                val (senhaCripto, iv, accessToken) = CriptoUtils.encrypt(novaSenha.senha, secretKey)  // criptografa a nova senha e gera um novo iv e accessToken
+        val cryptoManager = CryptoManager()
+        val (senhaCripto, iv) = cryptoManager.encrypt(novaSenha.senha, decryptedAesKey)
+        val accessToken = cryptoManager.generateAccessToken()
 
-                val doc = mutableMapOf(
-                    "senha" to senhaCripto,
-                    "login" to novaSenha.login,
-                    "iv" to iv,
-                    "accessToken" to accessToken,
-                    "descricao" to novaSenha.descricao,
-                )
-                if(categoria == "Sites"){                                                           // se a categoria for sites, adiciona o campo url
-                    doc["url"] = novaSenha.url
-                }
+        val doc = mutableMapOf<String, Any>(
+            "senha" to senhaCripto,
+            "login" to novaSenha.login,
+            "iv" to iv,
+            "accessToken" to accessToken,
+            "descricao" to novaSenha.descricao,
+        )
+        if (categoria == "Sites") {                                                           // se a categoria for sites, adiciona o campo url
+            doc["url"] = novaSenha.url
+        }
 
-                getSenhasRef(db, uid, categoria,
-                    onSuccess = { senhasRef ->
-                        senhasRef.document(senha.id)
-                            .update(doc as Map<String, Any>)
-                            .addOnSuccessListener {
-                                Log.d("UPDATEPASSWORD", "Senha atualizada")
-                                Toast.makeText(
-                                    context,
-                                    "Senha atualizada!",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                                viewModel.buscarSenhas(categoria)
-                            }
-                            .addOnFailureListener { e ->
-                                Toast.makeText(
-                                    context,
-                                    "Houve um erro ao editar a senha!",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                                Log.e("UPDATEPASSWORD", "Erro ao atualizar senha", e)
-                            }
-                    },
-                    onFailure = { e -> Log.e("UPDATEPASSWORD", e.message ?: "Erro desconhecido") }
-                )
+        getSenhasRef(
+            db, uid, categoria,
+            onSuccess = { senhasRef ->
+                senhasRef.document(senha.id)
+                    .update(doc)
+                    .addOnSuccessListener {
+                        Log.d("UPDATEPASSWORD", "Senha atualizada")
+                        Toast.makeText(
+                            context,
+                            "Senha atualizada!",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        viewModel.buscarSenhas(categoria)
+                    }
+                    .addOnFailureListener { e ->
+                        Toast.makeText(
+                            context,
+                            "Houve um erro ao editar a senha!",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        Log.e("UPDATEPASSWORD", "Erro ao atualizar senha", e)
+                    }
             },
-            onFailure = { e -> Log.e("CRYPTO", "Erro ao buscar chave AES", e) }
+            onFailure = { e ->
+                Log.e(
+                    "UPDATEPASSWORD",
+                    e.message ?: "Erro desconhecido"
+                )
+            }
         )
     } else {
         Log.e("UPDATEPASSWORD", "UID ou categoria nulo")
@@ -759,7 +779,8 @@ fun ColumnSenhas(                                                               
     viewModel: SenhasViewModel,
     auth: FirebaseAuth,
     db: FirebaseFirestore,
-    searchQuery : String
+    searchQuery : String,
+    decryptedAesKey: String?
 ){
     val context = LocalContext.current
     var senhaDescriptografada by remember { mutableStateOf("") }
@@ -819,27 +840,28 @@ fun ColumnSenhas(                                                               
                             onClick = {
                                 senhaClicada = senha
                                 if (uid != null) {
-                                    ChaveAesUtils.recuperarChaveDoUsuario(                          // descriptografa a senha para exibição
-                                        uid,
-                                        onSuccess = { chaveBase64 ->
-                                            val secretKey =
-                                                CriptoUtils.base64ToSecretKey(chaveBase64)
-                                            Log.d("SENHA", "$senhaClicada")
-                                            senhaDescriptografada = CriptoUtils.decrypt(
-                                                encryptedText = senhaClicada.senha,  // pego do Firestore
-                                                ivBase64 = senhaClicada.iv,                        // pego do Firestore
-                                                secretKey = secretKey
-                                            )
-                                            Log.d(
-                                                "DESCRIPTO",
-                                                "Senha descriptografada:$senhaDescriptografada",
-                                            )
-                                            showInfoDialog = true
-                                        },
-                                        onFailure = { e ->
-                                            Log.e("DESCRIPTO", "Erro ao descriptografar senha", e)
-                                        }
-                                    )
+                                    val vault = AndroidBiometricVault(context.findFragmentActivity())
+                                    val masterPassword = vault.getMasterPasswordSilently()
+
+                                    if(masterPassword != null) {
+                                        SecurityFlowManager.retrieveDecryptedAesKey(uid, masterPassword, db,
+                                            onSuccess = { decryptedAesKey ->
+                                                try {
+                                                    val cryptoManager = CryptoManager()
+                                                    senhaDescriptografada = cryptoManager.decrypt(
+                                                        encryptedText = senhaClicada.senha,
+                                                        ivBase64 = senhaClicada.iv,
+                                                        secretKeyBase64 = decryptedAesKey
+                                                    )
+                                                    showInfoDialog = true
+                                                } catch (e: Exception) {
+                                                    Log.e("DESCRIPTO", "Erro ao descriptografar", e)
+                                                    Toast.makeText(context, "Erro ao abrir senha", Toast.LENGTH_SHORT).show()
+                                                }
+                                            },
+                                            onFailure = { Log.e("DESCRIPTO", "Falha ao buscar chave") }
+                                        )
+                                    }
                                 }
                             }
                         )
@@ -904,6 +926,11 @@ fun ColumnSenhas(                                                               
                 val transitionState = visibleMap[senha.id]
                 showEditDialog = false
 
+                if(decryptedAesKey == null){
+                    showEditDialog = false
+                    return@EditPasswordDialog
+                }
+
                 scope.launch {                                                                      // anima a troca da senha
                     transitionState?.targetState = false
                     delay(300L)
@@ -914,7 +941,8 @@ fun ColumnSenhas(                                                               
                         viewModel = viewModel,
                         db = db,
                         auth = auth,
-                        context = context
+                        context = context,
+                        decryptedAesKey = decryptedAesKey
                     )
                     transitionState?.targetState = true
                     visibleMap[senha.id] = MutableTransitionState(false)

@@ -1,12 +1,19 @@
 package org.example.superid.security
 
+import android.util.Base64
 import android.util.Log
 import com.example.superid.security.CryptoManager
 import com.google.firebase.firestore.FirebaseFirestore
-import utils.ChaveAesUtils
+import java.security.SecureRandom
 
 object SecurityFlowManager {
     private val cryptoManager = CryptoManager()
+
+    private fun gerarChaveAesBase64(): String {               // Gera uma chave AES de 256 bits (32 bytes) e retorna em formato Base64.
+        val chave = ByteArray(32)               // Essa chave será usada para criptografar/descriptografar as senhas do usuário.
+        SecureRandom().nextBytes(chave)
+        return Base64.encodeToString(chave, Base64.NO_WRAP)
+    }
 
     // gera chave, encripta com a senha mestre e guarda no banco
     fun setupNewUserSecurity(
@@ -21,7 +28,7 @@ object SecurityFlowManager {
 
             val keyEncryptionKey = cryptoManager.generateKeyFromPassword(masterPassword, uid)
 
-            val rawAesKey = ChaveAesUtils.gerarChaveAesBase64()
+            val rawAesKey = gerarChaveAesBase64()
 
             val (encryptedAesKey, iv) = cryptoManager.encrypt(rawAesKey, keyEncryptionKey)
 

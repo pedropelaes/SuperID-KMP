@@ -31,7 +31,6 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
-import utils.ChaveAesUtils
 import android.provider.Settings
 import androidx.fragment.app.FragmentActivity
 import org.example.superid.security.AndroidBiometricVault
@@ -114,7 +113,7 @@ fun PerformSignUp(                                                              
 fun SaveNewAccount(context: Context, name: String, email: String, uid: String, tries: Int = 0) {    // salva no firestore o usuário que foi cadastrado
     val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
     val db = Firebase.firestore
-    val chave = ChaveAesUtils.gerarChaveAesBase64()                                                 // gera uma chave AES para cada usuário, utilizada para criptografia
+    //val chave = ChaveAesUtils.gerarChaveAesBase64()                                                 // gera uma chave AES para cada usuário, utilizada para criptografia
     val taskDoc = hashMapOf(
         "name" to name,
         "email" to email,

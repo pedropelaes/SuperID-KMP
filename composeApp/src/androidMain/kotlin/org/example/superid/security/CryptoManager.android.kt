@@ -1,6 +1,7 @@
 package com.example.superid.security
 
 import android.util.Base64
+import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.IvParameterSpec
@@ -41,5 +42,11 @@ actual class CryptoManager actual constructor() {
 
         val decryptedData = cipher.doFinal(Base64.decode(encryptedText, Base64.NO_WRAP))
         return String(decryptedData, Charsets.UTF_8)
+    }
+
+    actual fun generateAccessToken(): String {
+        val randomBytes = ByteArray(192)   // Gera um token aleatório de 256 caracteres (usado como accessToken da senha).
+        SecureRandom().nextBytes(randomBytes)
+        return Base64.encodeToString(randomBytes, Base64.NO_WRAP)
     }
 }

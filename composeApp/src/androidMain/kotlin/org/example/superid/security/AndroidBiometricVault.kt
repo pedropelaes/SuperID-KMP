@@ -72,4 +72,8 @@ class AndroidBiometricVault(
 
         biometricPrompt.authenticate(promptInfo)
     }
+
+    fun getMasterPasswordSilently(): String? {
+        return sharedPreferences.getString("master_password", null)
+    }
 }
