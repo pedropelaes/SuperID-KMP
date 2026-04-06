@@ -52,7 +52,7 @@ class LogInActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val authRepository = AndroidAuthRepository()
+        val authRepository = AndroidAuthRepository(this)
         val viewModel = LoginViewModel(authRepository)
         setContent{
             SuperIdTheme {
