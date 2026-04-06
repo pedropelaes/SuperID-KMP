@@ -12,6 +12,8 @@ import org.example.superid.security.AndroidBiometricVault
 import org.example.superid.security.SecurityFlowManager
 import kotlin.coroutines.resume
 import android.content.Context
+import com.google.firebase.functions.FirebaseFunctionsException
+import com.google.firebase.functions.ktx.functions
 
 class AndroidAuthRepository(private val context: Context) : AuthRepository {
     override suspend fun login(email: String, password: String): Result<Unit> {
@@ -104,6 +106,42 @@ class AndroidAuthRepository(private val context: Context) : AuthRepository {
         } catch (e: Exception) {
             // O próprio View Model pegará esse erro e jogará na tela em vez de um Toast
             Result.failure(e)
+        }
+    }
+
+    override suspend fun sendPasswordReset(email: String): Result<Unit> {
+        return try {
+            val functions = Firebase.functions
+
+            // 1. Chama a Cloud Function
+            val httpsCallable = functions.getHttpsCallableFromUrl(
+                java.net.URL("https://checkemailisverified-snp2owcvrq-rj.a.run.app")
+            )
+
+            val result = httpsCallable.call(mapOf("email" to email)).await()
+            val data = result.data as? Map<*, *> ?: throw Exception("Erro: resposta inválida do servidor.")
+            val isVerified = data["verified"] as? Boolean ?: false
+
+            // 2. Se for verificado, envia o e-mail de reset
+            if (isVerified) {
+                Firebase.auth.sendPasswordResetEmail(email).await()
+                Result.success(Unit)
+            } else {
+                throw Exception("Seu e-mail ainda não foi verificado.")
+            }
+
+        } catch (e: Exception) {
+            // Tratamento específico de erros da Cloud Function (igual ao seu original)
+            if (e is FirebaseFunctionsException) {
+                val message = when (e.code) {
+                    FirebaseFunctionsException.Code.NOT_FOUND -> "Nenhum usuário encontrado com esse e-mail."
+                    FirebaseFunctionsException.Code.INVALID_ARGUMENT -> "E-mail inválido."
+                    else -> "Erro na função: ${e.message}"
+                }
+                Result.failure(Exception(message))
+            } else {
+                Result.failure(e)
+            }
         }
     }
 }

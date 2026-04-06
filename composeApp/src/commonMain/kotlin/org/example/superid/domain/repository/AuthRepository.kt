@@ -6,4 +6,6 @@ interface AuthRepository {
     suspend fun signUp(name: String, email: String, masterPass: String, criptoPass: String) : Result<Unit>
 
     suspend fun checkIfEmailExists(email: String): Boolean
+
+    suspend fun sendPasswordReset(email: String): Result<Unit>
 }
